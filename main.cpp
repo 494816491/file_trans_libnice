@@ -79,6 +79,7 @@ static gboolean stdin_send_data_cb (GIOChannel *source, GIOCondition cond,
 #if 1
 #include <pthread.h>
 #include <stdio.h>
+#include <queue>
 int is_send{-1};
 char send_file_name[20]{};
 char recv_file_name[20]{};
@@ -108,21 +109,31 @@ void *send_func(void *data)
         return (void *)-1;
     }
     sleep(2);
+    int need_read = 1;
+    int left_send_size = 0;
     while(1){
-        ret = fread(buf, 1, buf_size, file);
-        if(ret <= 0){
-            printf("read file over exit \n");
-            break;
-        }
-        printf("send %d\n", buf_size);
-        ret = nice_agent_send(agent, stream_id, 1, buf_size, buf);
-        if(ret == -1){
+        if(left_send_size == 0){
 
+            ret = fread(buf, 1, buf_size, file);
+            if(ret <= 0){
+                printf("read file over exit \n");
+                break;
+            }
+            left_send_size = ret;
+        }
+        ret = nice_agent_send(agent, stream_id, 1, left_send_size, buf + buf_size - left_send_size);
+        if(ret == -1){
+            printf("send buf is full, sleep\n");
+            usleep(10000);
+        }else{
+            printf("send %d\n", ret);
+            left_send_size -= ret;
         }
     }
     fclose(file);
     return (void *)0;
 }
+
 void write_func_callback(NiceAgent *agent,
                guint      stream_id,
                guint      component_id,
