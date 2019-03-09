@@ -18,6 +18,7 @@ link_libraries(
     gio-2.0
     gobject-2.0
     glib-2.0
+    pthread
 
 
     )

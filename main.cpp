@@ -76,15 +76,98 @@ static gboolean stdin_remote_info_cb (GIOChannel *source, GIOCondition cond,
 static gboolean stdin_send_data_cb (GIOChannel *source, GIOCondition cond,
     gpointer data);
 
+#if 1
+#include <pthread.h>
+#include <stdio.h>
+int is_send{-1};
+char send_file_name[20]{};
+char recv_file_name[20]{};
+FILE *write_file;
+
+int recv_func(char *buf, unsigned int len)
+{
+    int ret;
+    printf("recv len = %d\n", len);
+    ret = fwrite(buf, 1, len, write_file);
+    if(ret < 0){
+        printf("fwrite failed\n");
+    }
+    fflush(write_file);
+    return 0;
+}
+int need_resend;
+void *send_func(void *data)
+{
+    int ret;
+    NiceAgent *agent = (NiceAgent *)data;
+    FILE *file = fopen(send_file_name, "r");
+    int buf_size{1024*4};
+    char *buf = new char[buf_size];
+    if(file == NULL){
+        printf("fopen %s failed\n", fopen);
+        return (void *)-1;
+    }
+    sleep(2);
+    while(1){
+        ret = fread(buf, 1, buf_size, file);
+        if(ret <= 0){
+            printf("read file over exit \n");
+            break;
+        }
+        printf("send %d\n", buf_size);
+        ret = nice_agent_send(agent, stream_id, 1, buf_size, buf);
+        if(ret == -1){
+
+        }
+    }
+    fclose(file);
+    return (void *)0;
+}
+void write_func_callback(NiceAgent *agent,
+               guint      stream_id,
+               guint      component_id,
+               gpointer   user_data)
+{
+
+}
+
+int create_send_recv_thread(NiceAgent * agent)
+{
+    printf("%s\n", __func__);
+    pthread_t thread{};
+    int ret;
+    ret = pthread_create(&thread, NULL, &send_func, agent);
+    if(ret != 0) {
+        printf("pthread_create %s failed\n",__func__);
+        exit(-1);
+    }
+
+}
+int create_recv_file()
+{
+    if(!is_send){
+        printf("recv fopen %s\n", recv_file_name);
+        write_file = fopen(recv_file_name, "w");
+        if(write_file == NULL){
+            printf("open write file failed\n");
+            exit(-1);
+        }
+
+    }
+    return 0;
+}
+#endif
+
+
 int main(int argc, char *argv[])
 {
   NiceAgent *agent;
   gchar *stun_addr = NULL;
   guint stun_port = 0;
   gboolean controlling;
-
   // Parse arguments
-  if (argc > 4 || argc < 2 || argv[1][1] != '\0') {
+  //if (argc > 4 || argc < 2 || argv[1][1] != '\0') {
+  if (argc > 5 || argc < 2 || argv[1][1] != '\0') {
     fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
     return EXIT_FAILURE;
   }
@@ -93,16 +176,29 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Usage: %s 0|1 stun_addr [stun_port]\n", argv[0]);
     return EXIT_FAILURE;
   }
-
   if (argc > 2) {
     stun_addr = argv[2];
+#if 0
     if (argc > 3)
       stun_port = atoi(argv[3]);
     else
       stun_port = 3478;
+#endif
+      stun_port = 3478;
 
     g_debug("Using stun server '[%s]:%u'\n", stun_addr, stun_port);
   }
+  if(!strcmp(argv[3], "send")){
+      is_send = 1;
+      strcpy(send_file_name, argv[4]);
+  }else{
+      is_send = 0;
+      strcpy(recv_file_name, argv[4]);
+  }
+#if 1// ln change
+    create_recv_file();
+#endif
+
 
   g_networking_init();
 
@@ -114,7 +210,8 @@ int main(int argc, char *argv[])
 #endif
 
   // Create the nice agent
-  agent = nice_agent_new(g_main_loop_get_context (gloop),
+  //agent = nice_agent_new(g_main_loop_get_context (gloop),
+  agent = nice_agent_new_reliable(g_main_loop_get_context (gloop),
       NICE_COMPATIBILITY_RFC5245);
   if (agent == NULL)
     g_error("Failed to create agent");
@@ -133,6 +230,9 @@ int main(int argc, char *argv[])
       G_CALLBACK(cb_new_selected_pair), NULL);
   g_signal_connect(agent, "component-state-changed",
       G_CALLBACK(cb_component_state_changed), NULL);
+
+  g_signal_connect(agent, "reliable-transport-writable",
+      G_CALLBACK(write_func_callback), NULL);
 
   // Create a new stream with one component
   stream_id = nice_agent_add_stream(agent, 1);
@@ -211,7 +311,6 @@ stdin_remote_info_cb (GIOChannel *source, GIOCondition cond,
 
   return ret;
 }
-
 static void
 cb_component_state_changed(NiceAgent *agent, guint _stream_id,
     guint component_id, guint state,
@@ -238,12 +337,19 @@ cb_component_state_changed(NiceAgent *agent, guint _stream_id,
 
     // Listen to stdin and send data written to it
     printf("\nSend lines to remote (Ctrl-D to quit):\n");
+#if 0// ln add
     g_io_add_watch(io_stdin, G_IO_IN, stdin_send_data_cb, agent);
+#else
+    if(is_send){
+        create_send_recv_thread(agent);
+    }
+#endif
     printf("> ");
     fflush (stdout);
   } else if (state == NICE_COMPONENT_STATE_FAILED) {
     g_main_loop_quit (gloop);
   }
+
 }
 
 static gboolean
@@ -255,7 +361,13 @@ stdin_send_data_cb (GIOChannel *source, GIOCondition cond,
 
   if (g_io_channel_read_line (source, &line, NULL, NULL, NULL) ==
       G_IO_STATUS_NORMAL) {
-    nice_agent_send(agent, stream_id, 1, strlen(line), line);
+#if 1
+    //nice_agent_send(agent, stream_id, 1, strlen(line), line);
+#else
+      char tmp_txt[1024];
+      memset(tmp_txt, 'a', sizeof(tmp_txt));
+    nice_agent_send(agent, stream_id, 1, sizeof(tmp_txt), tmp_txt);
+#endif
     g_free (line);
     printf("> ");
     fflush (stdout);
@@ -282,8 +394,16 @@ cb_nice_recv(NiceAgent *agent, guint _stream_id, guint component_id,
 {
   if (len == 1 && buf[0] == '\0')
     g_main_loop_quit (gloop);
+
+#if 0//ln change
   printf("%.*s", len, buf);
   fflush(stdout);
+#else
+  if(!is_send){
+
+      recv_func(buf, len);
+  }
+#endif
 }
 
 static NiceCandidate *
