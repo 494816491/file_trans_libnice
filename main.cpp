@@ -105,23 +105,34 @@ void *send_func(void *data)
     int buf_size{1024*4};
     char *buf = new char[buf_size];
     if(file == NULL){
-        printf("fopen %s failed\n", fopen);
+        printf("fopen %s failed\n", send_file_name);
         return (void *)-1;
     }
-    sleep(2);
+    //wait command to send file
+    while(1){
+
+        printf("enter s to start send file\n");
+        int m_char = getchar();
+        if(m_char == 's'){
+            printf("start to send file\n");
+            break;
+        }
+    }
+    //send file
     int need_read = 1;
     int left_send_size = 0;
+    int read_send_size= 0;
     while(1){
         if(left_send_size == 0){
-
             ret = fread(buf, 1, buf_size, file);
             if(ret <= 0){
                 printf("read file over exit \n");
                 break;
             }
             left_send_size = ret;
+            read_send_size =left_send_size;
         }
-        ret = nice_agent_send(agent, stream_id, 1, left_send_size, buf + buf_size - left_send_size);
+        ret = nice_agent_send(agent, stream_id, 1, left_send_size, buf + read_send_size - left_send_size);
         if(ret == -1){
             printf("send buf is full, sleep\n");
             usleep(10000);
@@ -130,6 +141,8 @@ void *send_func(void *data)
             left_send_size -= ret;
         }
     }
+
+    printf("close file %s\n", send_file_name);
     fclose(file);
     return (void *)0;
 }
