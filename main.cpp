@@ -81,8 +81,8 @@ static gboolean stdin_send_data_cb (GIOChannel *source, GIOCondition cond,
 #include <stdio.h>
 #include <queue>
 int is_send{-1};
-char send_file_name[20]{};
-char recv_file_name[20]{};
+char send_file_name[100]{};
+char recv_file_name[100]{};
 FILE *write_file;
 
 int recv_func(char *buf, unsigned int len)
